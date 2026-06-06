@@ -501,7 +501,7 @@ mod tests {
         fixture.add_worktree("dirty-wt", &dirty_path, "dirty");
         fs::write(dirty_path.join("untracked.txt"), "dirty").unwrap();
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             all: true,
             ..default_args()
@@ -530,7 +530,7 @@ mod tests {
         let worktree_path = fixture.temp.path().join("merged-wt");
         fixture.add_worktree("merged-wt", &worktree_path, "merged");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             merged: true,
             force: true,
@@ -558,7 +558,7 @@ mod tests {
         let worktree_path = fixture.temp.path().join("main-wt");
         fixture.add_worktree("main-wt", &worktree_path, "main");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             merged: true,
             force: true,
@@ -599,7 +599,7 @@ mod tests {
         let worktree_path = fixture.temp.path().join("gone-wt");
         fixture.add_worktree("gone-wt", &worktree_path, "gone");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             ..default_args()
         })
@@ -628,7 +628,7 @@ mod tests {
             "gone-with-broken-origin-head",
         );
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             ..default_args()
         })
@@ -653,7 +653,7 @@ mod tests {
         let worktree_path = fixture.temp.path().join("gone-on-trunk-wt");
         fixture.add_worktree("gone-on-trunk-wt", &worktree_path, "gone-on-trunk");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             ..default_args()
         })
@@ -677,7 +677,7 @@ mod tests {
         let worktree_path = fixture.temp.path().join("merged-wt");
         fixture.add_worktree("merged-wt", &worktree_path, "merged");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.temp.path().to_path_buf()],
             recursive: true,
             merged: true,
@@ -698,7 +698,7 @@ mod tests {
         fixture.add_worktree("stale-wt", &worktree_path, "stale");
         fs::remove_dir_all(&worktree_path).unwrap();
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             all: true,
             ..default_args()
@@ -731,7 +731,7 @@ mod tests {
         fs::create_dir(&blocked_path).unwrap();
         fs::set_permissions(&blocked_path, fs::Permissions::from_mode(0o0)).unwrap();
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             older_than: Some(Duration::from_secs(0)),
             ..default_args()
@@ -768,7 +768,7 @@ mod tests {
         fixture.add_worktree("unmerged-wt", &worktree_path, "unmerged");
         commit_in_worktree(&worktree_path, "unmerged.txt", "unmerged\n", "unmerged");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             all: true,
             force: true,
@@ -808,7 +808,7 @@ mod tests {
         fixture.add_worktree("dirty-remove-wt", &worktree_path, "dirty-remove");
         fs::write(worktree_path.join("untracked.txt"), "dirty").unwrap();
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             all: true,
             force: true,
@@ -830,7 +830,7 @@ mod tests {
         fixture.add_worktree("feature-wt", &worktree_path, "feature");
         commit_in_worktree(&worktree_path, "feature.txt", "feature\n", "feature");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![worktree_path.clone()],
             all: true,
             force: true,
@@ -884,7 +884,7 @@ mod tests {
         );
         fixture.tag_branch_tip("main", "feature-tagged-main");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![worktree_path.clone()],
             all: true,
             force: true,
@@ -936,7 +936,7 @@ mod tests {
         );
         fixture.tag_branch_tip("main", "feature-tagged-main");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             merged: true,
             ..default_args()
@@ -960,7 +960,7 @@ mod tests {
     fn missing_input_path_is_reported_in_json_shape() {
         let temp = tempfile::tempdir().unwrap();
         let missing = temp.path().join("missing");
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![missing.clone()],
             all: true,
             ..default_args()
@@ -994,7 +994,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let non_repo = temp.path().join("non-repo");
         fs::create_dir(&non_repo).unwrap();
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![non_repo.clone()],
             all: true,
             ..default_args()
@@ -1030,7 +1030,7 @@ mod tests {
         let worktree_path = fixture.temp.path().join("merged-to-main-wt");
         fixture.add_worktree("merged-to-main-wt", &worktree_path, "merged-to-main");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             merged_to: Some("main".to_owned()),
             ..default_args()
@@ -1054,7 +1054,7 @@ mod tests {
         let worktree_path = fixture.temp.path().join("feature-wt");
         fixture.add_worktree("feature-wt", &worktree_path, "feature");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             merged: true,
             ..default_args()
@@ -1088,7 +1088,7 @@ mod tests {
         fixture.add_worktree("unmerged-dry-run-wt", &worktree_path, "unmerged-dry-run");
         commit_in_worktree(&worktree_path, "dry-run.txt", "dry-run\n", "dry-run");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             all: true,
             delete_branch: true,
@@ -1119,7 +1119,7 @@ mod tests {
         let worktree_path = fixture.temp.path().join("basename-filter-wt");
         fixture.add_worktree("basename-filter-wt", &worktree_path, "basename-filter");
 
-        let config = SweepConfig::from_args(crate::cli::SweepArgs {
+        let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
             all: true,
             path_globs: vec!["basename-filter-wt".to_owned()],

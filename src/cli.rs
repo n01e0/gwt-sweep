@@ -1,25 +1,13 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use clap::{Args, Parser, Subcommand};
+use clap::Parser;
 
 use crate::duration::parse_duration_spec;
 
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 #[command(name = "gwt-sweep", version, about = "Clean stale Git worktrees")]
 pub struct Cli {
-    #[command(subcommand)]
-    pub command: CliCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum CliCommand {
-    /// Find and remove Git worktrees that match cleanup selectors.
-    Sweep(SweepArgs),
-}
-
-#[derive(Clone, Debug, Args)]
-pub struct SweepArgs {
     /// Git repository paths to inspect.
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
@@ -82,8 +70,8 @@ pub struct SweepArgs {
 }
 
 #[cfg(test)]
-pub fn default_args() -> SweepArgs {
-    SweepArgs {
+pub fn default_args() -> Cli {
+    Cli {
         paths: Vec::new(),
         recursive: false,
         gone: false,
@@ -99,5 +87,21 @@ pub fn default_args() -> SweepArgs {
         force_with_dirty: false,
         delete_branch: false,
         json: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[test]
+    fn parses_options_at_top_level() {
+        let cli = Cli::parse_from(["gwt-sweep", "--json", "--merged", "/repo"]);
+
+        assert!(cli.json);
+        assert!(cli.merged);
+        assert_eq!(cli.paths, vec![PathBuf::from("/repo")]);
     }
 }

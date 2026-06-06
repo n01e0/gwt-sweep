@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
-use crate::cli::SweepArgs;
+use crate::cli::Cli;
 
 const DEFAULT_PATH: &str = ".";
 
@@ -29,7 +29,7 @@ pub struct SweepConfig {
 }
 
 impl SweepConfig {
-    pub fn from_args(args: SweepArgs) -> Result<Self> {
+    pub fn from_args(args: Cli) -> Result<Self> {
         let has_explicit_merged_selector = args.merged || args.merged_to.is_some();
         let has_reason_selector =
             args.gone || has_explicit_merged_selector || args.older_than.is_some() || args.all;
