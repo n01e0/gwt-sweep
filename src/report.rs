@@ -70,13 +70,13 @@ pub fn update_summary(summary: &mut SweepSummary, item: &SweepItem) {
     }
 }
 
-pub fn print_human_report(report: &SweepReport, verbose: bool) -> io::Result<()> {
+pub fn print_text_report(report: &SweepReport, verbose: bool) -> io::Result<()> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
-    write_human_report(&mut stdout, report, verbose)
+    write_text_report(&mut stdout, report, verbose)
 }
 
-fn write_human_report(
+fn write_text_report(
     writer: &mut impl Write,
     report: &SweepReport,
     verbose: bool,
@@ -94,31 +94,60 @@ fn write_human_report(
         return Ok(());
     }
 
+    let rows = items
+        .iter()
+        .map(|item| TextRow {
+            item,
+            action: item.action.as_str(),
+            state: if item.dirty { "dirty" } else { "clean" },
+            branch: item.branch.as_deref().unwrap_or("-"),
+            reasons: item.reasons.join(","),
+            path: item.path.as_str(),
+        })
+        .collect::<Vec<_>>();
+    let action_width = column_width("ACTION", rows.iter().map(|row| row.action));
+    let state_width = column_width("STATE", rows.iter().map(|row| row.state));
+    let branch_width = column_width("BRANCH", rows.iter().map(|row| row.branch));
+    let reasons_width = column_width("REASONS", rows.iter().map(|row| row.reasons.as_str()));
+
     writeln!(
         writer,
-        "{:<14} {:<5} {:<28} {:<22} PATH",
-        "ACTION", "DIRTY", "BRANCH", "REASONS"
+        "{:<action_width$}  {:<state_width$}  {:<branch_width$}  {:<reasons_width$}  PATH",
+        "ACTION",
+        "STATE",
+        "BRANCH",
+        "REASONS",
+        action_width = action_width,
+        state_width = state_width,
+        branch_width = branch_width,
+        reasons_width = reasons_width
     )?;
-    for item in items {
-        let branch = item.branch.as_deref().unwrap_or("-");
-        let reasons = item.reasons.join(",");
+    for row in rows {
         writeln!(
             writer,
-            "{:<14} {:<5} {:<28} {:<22} {}",
-            item.action, item.dirty, branch, reasons, item.path
+            "{:<action_width$}  {:<state_width$}  {:<branch_width$}  {:<reasons_width$}  {}",
+            row.action,
+            row.state,
+            row.branch,
+            row.reasons,
+            row.path,
+            action_width = action_width,
+            state_width = state_width,
+            branch_width = branch_width,
+            reasons_width = reasons_width
         )?;
 
         if verbose {
-            if let Some(reason) = &item.skip_reason {
+            if let Some(reason) = &row.item.skip_reason {
                 writeln!(writer, "  note: {reason}")?;
             }
-            if let Some(error) = &item.error {
+            if let Some(error) = &row.item.error {
                 writeln!(writer, "  error: {error}")?;
             }
-            if let Some(action) = &item.branch_action {
+            if let Some(action) = &row.item.branch_action {
                 writeln!(writer, "  branch: {action}")?;
             }
-            if let Some(error) = &item.branch_error {
+            if let Some(error) = &row.item.branch_error {
                 writeln!(writer, "  branch error: {error}")?;
             }
         }
@@ -129,6 +158,21 @@ fn write_human_report(
     }
 
     Ok(())
+}
+
+struct TextRow<'a> {
+    item: &'a SweepItem,
+    action: &'a str,
+    state: &'static str,
+    branch: &'a str,
+    reasons: String,
+    path: &'a str,
+}
+
+fn column_width<'a>(header: &str, values: impl Iterator<Item = &'a str>) -> usize {
+    values.fold(header.len(), |width, value| {
+        width.max(value.chars().count())
+    })
 }
 
 fn write_summary(writer: &mut impl Write, report: &SweepReport) -> io::Result<()> {
@@ -185,20 +229,20 @@ mod tests {
     }
 
     #[test]
-    fn human_report_is_silent_when_empty() {
+    fn text_report_is_silent_when_empty() {
         let report = SweepReport {
             items: Vec::new(),
             summary: SweepSummary::default(),
         };
         let mut output = Vec::new();
 
-        write_human_report(&mut output, &report, false).unwrap();
+        write_text_report(&mut output, &report, false).unwrap();
 
         assert!(output.is_empty());
     }
 
     #[test]
-    fn human_report_hides_errors_and_summary() {
+    fn text_report_hides_errors_and_summary() {
         let report = SweepReport {
             items: vec![
                 SweepItem {
@@ -245,10 +289,11 @@ mod tests {
         };
         let mut output = Vec::new();
 
-        write_human_report(&mut output, &report, false).unwrap();
+        write_text_report(&mut output, &report, false).unwrap();
         let output = String::from_utf8(output).unwrap();
 
         assert!(output.contains("would_remove"));
+        assert!(output.contains("clean"));
         assert!(output.contains("/repo-wt"));
         assert!(!output.contains("/bad"));
         assert!(!output.contains("Summary"));
@@ -259,7 +304,56 @@ mod tests {
     }
 
     #[test]
-    fn verbose_human_report_includes_errors_and_summary() {
+    fn text_report_uses_dynamic_column_widths() {
+        let report = SweepReport {
+            items: vec![
+                SweepItem {
+                    kind: KIND_WORKTREE.to_owned(),
+                    repo: "/repo".to_owned(),
+                    path: "/short".to_owned(),
+                    branch: Some("a".to_owned()),
+                    head: None,
+                    reasons: vec!["gone".to_owned()],
+                    dirty: false,
+                    locked: false,
+                    action: ACTION_WOULD_REMOVE.to_owned(),
+                    skip_reason: None,
+                    error: None,
+                    branch_deleted: false,
+                    branch_action: None,
+                    branch_error: None,
+                },
+                SweepItem {
+                    kind: KIND_WORKTREE.to_owned(),
+                    repo: "/repo".to_owned(),
+                    path: "/long".to_owned(),
+                    branch: Some("long-feature-name".to_owned()),
+                    head: None,
+                    reasons: vec!["merged:main".to_owned(), "gone".to_owned()],
+                    dirty: true,
+                    locked: false,
+                    action: ACTION_SKIP.to_owned(),
+                    skip_reason: None,
+                    error: None,
+                    branch_deleted: false,
+                    branch_action: None,
+                    branch_error: None,
+                },
+            ],
+            summary: SweepSummary::default(),
+        };
+        let mut output = Vec::new();
+
+        write_text_report(&mut output, &report, false).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("ACTION        STATE  BRANCH             REASONS"));
+        assert!(output.contains("would_remove  clean  a                  gone"));
+        assert!(output.contains("skip          dirty  long-feature-name  merged:main,gone"));
+    }
+
+    #[test]
+    fn verbose_text_report_includes_errors_and_summary() {
         let report = SweepReport {
             items: vec![SweepItem {
                 kind: KIND_REPOSITORY_ERROR.to_owned(),
@@ -286,7 +380,7 @@ mod tests {
         };
         let mut output = Vec::new();
 
-        write_human_report(&mut output, &report, true).unwrap();
+        write_text_report(&mut output, &report, true).unwrap();
         let output = String::from_utf8(output).unwrap();
 
         assert!(output.contains("repo:error"));
@@ -296,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn verbose_human_report_mentions_empty_results() {
+    fn verbose_text_report_mentions_empty_results() {
         let report = SweepReport {
             items: Vec::new(),
             summary: SweepSummary {
@@ -307,7 +401,7 @@ mod tests {
         };
         let mut output = Vec::new();
 
-        write_human_report(&mut output, &report, true).unwrap();
+        write_text_report(&mut output, &report, true).unwrap();
         let output = String::from_utf8(output).unwrap();
 
         assert!(output.contains("No matching worktrees."));
