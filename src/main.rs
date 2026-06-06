@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::io::{self, IsTerminal};
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -101,15 +102,26 @@ impl TextProgress {
         bar.set_message(message.into());
         *self.bar.borrow_mut() = Some(bar);
     }
+
+    fn start_spinner(&self, message: impl Into<String>) {
+        if !self.enabled {
+            return;
+        }
+
+        self.clear();
+        let bar = ProgressBar::new_spinner();
+        bar.set_style(
+            ProgressStyle::with_template("{spinner:.green} {msg} ({pos} scanned)")
+                .expect("progress style template should be valid"),
+        );
+        bar.set_message(message.into());
+        bar.enable_steady_tick(Duration::from_millis(80));
+        *self.bar.borrow_mut() = Some(bar);
+    }
 }
 
 impl DiscoveryProgress for TextProgress {
-    fn directory_discovered(&self, _path: &Path) {
-        if let Some(bar) = self.bar.borrow().as_ref() {
-            let next = bar.length().unwrap_or(0).saturating_add(1);
-            bar.set_length(next);
-        }
-    }
+    fn directory_discovered(&self, _path: &Path) {}
 
     fn directory_scanned(&self, _path: &Path) {
         if let Some(bar) = self.bar.borrow().as_ref() {
@@ -120,7 +132,7 @@ impl DiscoveryProgress for TextProgress {
 
 impl SweepProgress for TextProgress {
     fn begin_discovery(&self) {
-        self.start_bar(0, "Discovering repositories");
+        self.start_spinner("Discovering repositories");
     }
 
     fn repositories_discovered(&self, total: usize) {
