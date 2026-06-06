@@ -7,7 +7,7 @@ use crate::config::SweepConfig;
 use crate::duration::format_duration;
 use crate::fs_scan::is_older_than;
 use crate::git::{
-    MergeBase, WorktreeInfo, branch_tracks_gone_upstream, check_branch_delete_safety,
+    MergeBase, RepoInfo, WorktreeInfo, branch_tracks_gone_upstream, check_branch_delete_safety,
     current_worktree, delete_branch_safely, discover_repositories, is_ancestor, is_worktree_dirty,
     list_worktrees, open_repo, remove_worktree, same_path,
 };
@@ -36,8 +36,32 @@ struct ReasonSet {
     errors: Vec<String>,
 }
 
+pub trait SweepProgress {
+    fn begin_discovery(&self) {}
+    fn repositories_discovered(&self, _total: usize) {}
+    fn begin_repository(&self, _path: &Path) {}
+    fn finish_repository(&self) {}
+}
+
+#[cfg(test)]
+struct NoProgress;
+
+#[cfg(test)]
+impl SweepProgress for NoProgress {}
+
+#[cfg(test)]
 pub fn build_report(config: &SweepConfig, cwd: &Path) -> Result<SweepReport> {
+    build_report_with_progress(config, cwd, &NoProgress)
+}
+
+pub fn build_report_with_progress(
+    config: &SweepConfig,
+    cwd: &Path,
+    progress: &impl SweepProgress,
+) -> Result<SweepReport> {
+    progress.begin_discovery();
     let discovery = discover_repositories(&config.paths, config.recursive, config.include_hidden);
+    progress.repositories_discovered(discovery.repos.len());
     let current = current_worktree(cwd)?;
     let mut report = SweepReport {
         items: Vec::new(),
@@ -55,9 +79,51 @@ pub fn build_report(config: &SweepConfig, cwd: &Path) -> Result<SweepReport> {
     }
 
     for repo_info in discovery.repos {
-        let repo = match open_repo(&repo_info.path) {
-            Ok(repo) => repo,
-            Err(error) => {
+        progress.begin_repository(&repo_info.path);
+        let result = process_repository(&repo_info, config, current.as_deref(), &mut report);
+        progress.finish_repository();
+        result?;
+    }
+
+    Ok(report)
+}
+
+fn process_repository(
+    repo_info: &RepoInfo,
+    config: &SweepConfig,
+    current: Option<&Path>,
+    report: &mut SweepReport,
+) -> Result<()> {
+    let repo = match open_repo(&repo_info.path) {
+        Ok(repo) => repo,
+        Err(error) => {
+            let item = error_item(
+                &repo_info.path,
+                &repo_info.path,
+                vec!["repo:error"],
+                format!("{error:#}"),
+            );
+            update_summary(&mut report.summary, &item);
+            report.items.push(item);
+            return Ok(());
+        }
+    };
+    let merge_base = if config.select_merged {
+        match crate::git::resolve_merge_base(&repo, config.merge_base_ref.as_deref()) {
+            Ok(Some(base)) => Some(base),
+            Ok(None) if config.require_merge_base => {
+                let item = error_item(
+                    &repo_info.path,
+                    &repo_info.path,
+                    vec!["merged:error"],
+                    "failed to resolve merge base; pass --merged-to <ref>".to_owned(),
+                );
+                update_summary(&mut report.summary, &item);
+                report.items.push(item);
+                return Ok(());
+            }
+            Ok(None) => None,
+            Err(error) if config.require_merge_base => {
                 let item = error_item(
                     &repo_info.path,
                     &repo_info.path,
@@ -66,24 +132,18 @@ pub fn build_report(config: &SweepConfig, cwd: &Path) -> Result<SweepReport> {
                 );
                 update_summary(&mut report.summary, &item);
                 report.items.push(item);
-                continue;
+                return Ok(());
             }
-        };
-        let merge_base = if config.select_merged {
-            match crate::git::resolve_merge_base(&repo, config.merge_base_ref.as_deref()) {
-                Ok(Some(base)) => Some(base),
-                Ok(None) if config.require_merge_base => {
-                    let item = error_item(
-                        &repo_info.path,
-                        &repo_info.path,
-                        vec!["merged:error"],
-                        "failed to resolve merge base; pass --merged-to <ref>".to_owned(),
-                    );
-                    update_summary(&mut report.summary, &item);
-                    report.items.push(item);
-                    continue;
-                }
-                Ok(None) => None,
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+    let branch_delete_base = if config.delete_branch {
+        match merge_base.clone() {
+            Some(base) => Some(base),
+            None => match crate::git::resolve_merge_base(&repo, config.merge_base_ref.as_deref()) {
+                Ok(base) => base,
                 Err(error) if config.require_merge_base => {
                     let item = error_item(
                         &repo_info.path,
@@ -93,79 +153,49 @@ pub fn build_report(config: &SweepConfig, cwd: &Path) -> Result<SweepReport> {
                     );
                     update_summary(&mut report.summary, &item);
                     report.items.push(item);
-                    continue;
+                    return Ok(());
                 }
                 Err(_) => None,
-            }
-        } else {
-            None
-        };
-        let branch_delete_base = if config.delete_branch {
-            match merge_base.clone() {
-                Some(base) => Some(base),
-                None => {
-                    match crate::git::resolve_merge_base(&repo, config.merge_base_ref.as_deref()) {
-                        Ok(base) => base,
-                        Err(error) if config.require_merge_base => {
-                            let item = error_item(
-                                &repo_info.path,
-                                &repo_info.path,
-                                vec!["repo:error"],
-                                format!("{error:#}"),
-                            );
-                            update_summary(&mut report.summary, &item);
-                            report.items.push(item);
-                            continue;
-                        }
-                        Err(_) => None,
-                    }
-                }
-            }
-        } else {
-            None
-        };
-        let context = RepoContext {
-            merge_base,
-            branch_delete_base,
-        };
-        let worktrees = match list_worktrees(&repo) {
-            Ok(worktrees) => worktrees,
-            Err(error) => {
-                let item = error_item(
-                    &repo_info.path,
-                    &repo_info.path,
-                    vec!["repo:error"],
-                    format!("{error:#}"),
-                );
-                update_summary(&mut report.summary, &item);
-                report.items.push(item);
-                continue;
-            }
-        };
-
-        for worktree in worktrees {
-            let Some(mut evaluation) = evaluate_worktree(
-                &repo,
-                &repo_info.path,
-                &worktree,
-                &context,
-                config,
-                current.as_deref(),
-            )?
-            else {
-                continue;
-            };
-
-            if config.force && evaluation.can_remove {
-                remove_and_maybe_delete_branch(&repo, &mut evaluation, &context);
-            }
-
-            update_summary(&mut report.summary, &evaluation.item);
-            report.items.push(evaluation.item);
+            },
         }
+    } else {
+        None
+    };
+    let context = RepoContext {
+        merge_base,
+        branch_delete_base,
+    };
+    let worktrees = match list_worktrees(&repo) {
+        Ok(worktrees) => worktrees,
+        Err(error) => {
+            let item = error_item(
+                &repo_info.path,
+                &repo_info.path,
+                vec!["repo:error"],
+                format!("{error:#}"),
+            );
+            update_summary(&mut report.summary, &item);
+            report.items.push(item);
+            return Ok(());
+        }
+    };
+
+    for worktree in worktrees {
+        let Some(mut evaluation) =
+            evaluate_worktree(&repo, &repo_info.path, &worktree, &context, config, current)?
+        else {
+            continue;
+        };
+
+        if config.force && evaluation.can_remove {
+            remove_and_maybe_delete_branch(&repo, &mut evaluation, &context);
+        }
+
+        update_summary(&mut report.summary, &evaluation.item);
+        report.items.push(evaluation.item);
     }
 
-    Ok(report)
+    Ok(())
 }
 
 fn error_item(repo: &Path, path: &Path, reasons: Vec<&str>, error: String) -> SweepItem {
@@ -483,6 +513,7 @@ fn remove_and_maybe_delete_branch(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::fs;
     use std::time::Duration;
 
@@ -725,6 +756,34 @@ mod tests {
         assert_eq!(report.summary.repositories, 1);
         assert_eq!(report.summary.would_remove, 1);
         assert_eq!(report.items[0].path, worktree_path.display().to_string());
+    }
+
+    #[test]
+    fn build_report_reports_repository_progress() {
+        let fixture = GitFixture::new();
+        fixture.create_branch("merged-progress");
+        let worktree_path = fixture.temp.path().join("merged-progress-wt");
+        fixture.add_worktree("merged-progress-wt", &worktree_path, "merged-progress");
+        let progress = RecordingProgress::default();
+
+        let config = SweepConfig::from_args(crate::cli::Cli {
+            paths: vec![fixture.repo_path.clone()],
+            merged: true,
+            ..default_args()
+        })
+        .unwrap();
+        let report = build_report_with_progress(&config, &fixture.repo_path, &progress).unwrap();
+
+        assert_eq!(report.summary.repositories, 1);
+        assert_eq!(
+            progress.events.borrow().as_slice(),
+            &[
+                "begin_discovery".to_owned(),
+                "repositories_discovered:1".to_owned(),
+                format!("begin_repository:{}", fixture.repo_path.display()),
+                "finish_repository".to_owned(),
+            ]
+        );
     }
 
     #[test]
@@ -1242,6 +1301,35 @@ mod tests {
             self.repo
                 .tag_lightweight(tag, commit.as_object(), false)
                 .unwrap();
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingProgress {
+        events: RefCell<Vec<String>>,
+    }
+
+    impl SweepProgress for RecordingProgress {
+        fn begin_discovery(&self) {
+            self.events.borrow_mut().push("begin_discovery".to_owned());
+        }
+
+        fn repositories_discovered(&self, total: usize) {
+            self.events
+                .borrow_mut()
+                .push(format!("repositories_discovered:{total}"));
+        }
+
+        fn begin_repository(&self, path: &Path) {
+            self.events
+                .borrow_mut()
+                .push(format!("begin_repository:{}", path.display()));
+        }
+
+        fn finish_repository(&self) {
+            self.events
+                .borrow_mut()
+                .push("finish_repository".to_owned());
         }
     }
 

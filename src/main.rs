@@ -8,7 +8,6 @@ mod sweep;
 
 use std::io::{self, IsTerminal};
 use std::process::ExitCode;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -17,7 +16,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use crate::cli::Cli;
 use crate::config::SweepConfig;
 use crate::report::print_text_report;
-use crate::sweep::build_report;
+use crate::sweep::{SweepProgress, build_report_with_progress};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -33,14 +32,14 @@ fn main() -> ExitCode {
 fn run_cli(cli: Cli) -> Result<ExitCode> {
     let config = SweepConfig::from_args(cli)?;
     let current_dir = std::env::current_dir().context("failed to read current directory")?;
-    let progress = start_progress(&config);
-    let report = match build_report(&config, &current_dir) {
+    let progress = TextProgress::new(&config);
+    let report = match build_report_with_progress(&config, &current_dir, &progress) {
         Ok(report) => {
-            clear_progress(&progress);
+            progress.clear();
             report
         }
         Err(error) => {
-            clear_progress(&progress);
+            progress.clear();
             return Err(error);
         }
     };
@@ -58,23 +57,62 @@ fn run_cli(cli: Cli) -> Result<ExitCode> {
     }
 }
 
-fn start_progress(config: &SweepConfig) -> Option<ProgressBar> {
-    if config.json || !io::stderr().is_terminal() {
-        return None;
-    }
-
-    let progress = ProgressBar::new_spinner();
-    progress.set_style(
-        ProgressStyle::with_template("{spinner:.green} {msg}")
-            .expect("progress style template should be valid"),
-    );
-    progress.set_message("Sweeping worktrees...");
-    progress.enable_steady_tick(Duration::from_millis(80));
-    Some(progress)
+struct TextProgress {
+    bar: Option<ProgressBar>,
 }
 
-fn clear_progress(progress: &Option<ProgressBar>) {
-    if let Some(progress) = progress {
-        progress.finish_and_clear();
+impl TextProgress {
+    fn new(config: &SweepConfig) -> Self {
+        if config.json || !io::stderr().is_terminal() {
+            return Self { bar: None };
+        }
+
+        let bar = ProgressBar::new(1);
+        bar.set_style(
+            ProgressStyle::with_template("{wide_bar:.cyan/blue} {pos:>3}/{len:<3} {msg}")
+                .expect("progress style template should be valid")
+                .progress_chars("=>-"),
+        );
+        Self { bar: Some(bar) }
+    }
+
+    fn clear(&self) {
+        if let Some(bar) = &self.bar {
+            bar.finish_and_clear();
+        }
+    }
+}
+
+impl SweepProgress for TextProgress {
+    fn begin_discovery(&self) {
+        if let Some(bar) = &self.bar {
+            bar.set_length(1);
+            bar.set_position(0);
+            bar.set_message("Discovering repositories");
+        }
+    }
+
+    fn repositories_discovered(&self, total: usize) {
+        if let Some(bar) = &self.bar {
+            bar.set_length(total.max(1) as u64);
+            bar.set_position(0);
+            if total == 0 {
+                bar.set_message("No repositories found");
+            } else {
+                bar.set_message("Inspecting repositories");
+            }
+        }
+    }
+
+    fn begin_repository(&self, path: &std::path::Path) {
+        if let Some(bar) = &self.bar {
+            bar.set_message(format!("Inspecting {}", path.display()));
+        }
+    }
+
+    fn finish_repository(&self) {
+        if let Some(bar) = &self.bar {
+            bar.inc(1);
+        }
     }
 }
