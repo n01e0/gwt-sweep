@@ -43,10 +43,16 @@ pub struct WorktreeInfo {
     pub inspection_error: Option<String>,
 }
 
-pub fn discover_repositories(
+pub trait DiscoveryProgress {
+    fn directory_discovered(&self, _path: &Path) {}
+    fn directory_scanned(&self, _path: &Path) {}
+}
+
+pub fn discover_repositories_with_progress(
     paths: &[PathBuf],
     recursive: bool,
     include_hidden: bool,
+    progress: &impl DiscoveryProgress,
 ) -> DiscoveryResult {
     let mut candidates = Vec::new();
     let mut errors = Vec::new();
@@ -76,7 +82,14 @@ pub fn discover_repositories(
         }
 
         if recursive && input.is_dir() {
-            discover_repositories_under(&input, include_hidden, &mut candidates, &mut errors);
+            progress.directory_discovered(&input);
+            discover_repositories_under(
+                &input,
+                include_hidden,
+                progress,
+                &mut candidates,
+                &mut errors,
+            );
         }
     }
 
@@ -308,9 +321,12 @@ pub fn same_path(left: &Path, right: &Path) -> bool {
 fn discover_repositories_under(
     path: &Path,
     include_hidden: bool,
+    progress: &impl DiscoveryProgress,
     candidates: &mut Vec<PathBuf>,
     errors: &mut Vec<DiscoveryError>,
 ) {
+    progress.directory_scanned(path);
+
     if path.join(".git").exists() {
         candidates.push(path.to_path_buf());
     }
@@ -359,7 +375,8 @@ fn discover_repositories_under(
             continue;
         }
 
-        discover_repositories_under(&entry.path(), include_hidden, candidates, errors);
+        progress.directory_discovered(&entry.path());
+        discover_repositories_under(&entry.path(), include_hidden, progress, candidates, errors);
     }
 }
 

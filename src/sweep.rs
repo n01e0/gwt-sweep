@@ -7,9 +7,10 @@ use crate::config::SweepConfig;
 use crate::duration::format_duration;
 use crate::fs_scan::is_older_than;
 use crate::git::{
-    MergeBase, RepoInfo, WorktreeInfo, branch_tracks_gone_upstream, check_branch_delete_safety,
-    current_worktree, delete_branch_safely, discover_repositories, is_ancestor, is_worktree_dirty,
-    list_worktrees, open_repo, remove_worktree, same_path,
+    DiscoveryProgress, MergeBase, RepoInfo, WorktreeInfo, branch_tracks_gone_upstream,
+    check_branch_delete_safety, current_worktree, delete_branch_safely,
+    discover_repositories_with_progress, is_ancestor, is_worktree_dirty, list_worktrees, open_repo,
+    remove_worktree, same_path,
 };
 use crate::report::{
     ACTION_ERROR, ACTION_REMOVED, ACTION_SKIP, ACTION_WOULD_REMOVE, KIND_REPOSITORY_ERROR,
@@ -36,7 +37,7 @@ struct ReasonSet {
     errors: Vec<String>,
 }
 
-pub trait SweepProgress {
+pub trait SweepProgress: DiscoveryProgress {
     fn begin_discovery(&self) {}
     fn repositories_discovered(&self, _total: usize) {}
     fn begin_repository(&self, _path: &Path) {}
@@ -50,6 +51,9 @@ struct NoProgress;
 impl SweepProgress for NoProgress {}
 
 #[cfg(test)]
+impl DiscoveryProgress for NoProgress {}
+
+#[cfg(test)]
 pub fn build_report(config: &SweepConfig, cwd: &Path) -> Result<SweepReport> {
     build_report_with_progress(config, cwd, &NoProgress)
 }
@@ -60,7 +64,12 @@ pub fn build_report_with_progress(
     progress: &impl SweepProgress,
 ) -> Result<SweepReport> {
     progress.begin_discovery();
-    let discovery = discover_repositories(&config.paths, config.recursive, config.include_hidden);
+    let discovery = discover_repositories_with_progress(
+        &config.paths,
+        config.recursive,
+        config.include_hidden,
+        progress,
+    );
     progress.repositories_discovered(discovery.repos.len());
     let current = current_worktree(cwd)?;
     let mut report = SweepReport {
@@ -768,6 +777,7 @@ mod tests {
 
         let config = SweepConfig::from_args(crate::cli::Cli {
             paths: vec![fixture.repo_path.clone()],
+            recursive: true,
             merged: true,
             ..default_args()
         })
@@ -779,6 +789,8 @@ mod tests {
             progress.events.borrow().as_slice(),
             &[
                 "begin_discovery".to_owned(),
+                format!("directory_discovered:{}", fixture.repo_path.display()),
+                format!("directory_scanned:{}", fixture.repo_path.display()),
                 "repositories_discovered:1".to_owned(),
                 format!("begin_repository:{}", fixture.repo_path.display()),
                 "finish_repository".to_owned(),
@@ -1330,6 +1342,20 @@ mod tests {
             self.events
                 .borrow_mut()
                 .push("finish_repository".to_owned());
+        }
+    }
+
+    impl DiscoveryProgress for RecordingProgress {
+        fn directory_discovered(&self, path: &Path) {
+            self.events
+                .borrow_mut()
+                .push(format!("directory_discovered:{}", path.display()));
+        }
+
+        fn directory_scanned(&self, path: &Path) {
+            self.events
+                .borrow_mut()
+                .push(format!("directory_scanned:{}", path.display()));
         }
     }
 

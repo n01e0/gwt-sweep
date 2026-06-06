@@ -6,7 +6,9 @@ mod git;
 mod report;
 mod sweep;
 
+use std::cell::RefCell;
 use std::io::{self, IsTerminal};
+use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
@@ -15,6 +17,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::cli::Cli;
 use crate::config::SweepConfig;
+use crate::git::DiscoveryProgress;
 use crate::report::print_text_report;
 use crate::sweep::{SweepProgress, build_report_with_progress};
 
@@ -58,60 +61,84 @@ fn run_cli(cli: Cli) -> Result<ExitCode> {
 }
 
 struct TextProgress {
-    bar: Option<ProgressBar>,
+    enabled: bool,
+    bar: RefCell<Option<ProgressBar>>,
 }
 
 impl TextProgress {
     fn new(config: &SweepConfig) -> Self {
         if config.json || !io::stderr().is_terminal() {
-            return Self { bar: None };
+            return Self {
+                enabled: false,
+                bar: RefCell::new(None),
+            };
         }
 
-        let bar = ProgressBar::new(1);
-        bar.set_style(
-            ProgressStyle::with_template("{wide_bar:.cyan/blue} {pos:>3}/{len:<3} {msg}")
-                .expect("progress style template should be valid")
-                .progress_chars("=>-"),
-        );
-        Self { bar: Some(bar) }
+        Self {
+            enabled: true,
+            bar: RefCell::new(None),
+        }
     }
 
     fn clear(&self) {
-        if let Some(bar) = &self.bar {
+        if let Some(bar) = self.bar.borrow_mut().take() {
             bar.finish_and_clear();
+        }
+    }
+
+    fn start_bar(&self, length: u64, message: impl Into<String>) {
+        if !self.enabled {
+            return;
+        }
+
+        self.clear();
+        let bar = ProgressBar::new(length);
+        bar.set_style(
+            ProgressStyle::with_template("{wide_bar:.cyan/blue} {pos:>5}/{len:<5} {msg}")
+                .expect("progress style template should be valid")
+                .progress_chars("=>-"),
+        );
+        bar.set_message(message.into());
+        *self.bar.borrow_mut() = Some(bar);
+    }
+}
+
+impl DiscoveryProgress for TextProgress {
+    fn directory_discovered(&self, _path: &Path) {
+        if let Some(bar) = self.bar.borrow().as_ref() {
+            let next = bar.length().unwrap_or(0).saturating_add(1);
+            bar.set_length(next);
+        }
+    }
+
+    fn directory_scanned(&self, _path: &Path) {
+        if let Some(bar) = self.bar.borrow().as_ref() {
+            bar.inc(1);
         }
     }
 }
 
 impl SweepProgress for TextProgress {
     fn begin_discovery(&self) {
-        if let Some(bar) = &self.bar {
-            bar.set_length(1);
-            bar.set_position(0);
-            bar.set_message("Discovering repositories");
-        }
+        self.start_bar(0, "Discovering repositories");
     }
 
     fn repositories_discovered(&self, total: usize) {
-        if let Some(bar) = &self.bar {
-            bar.set_length(total.max(1) as u64);
-            bar.set_position(0);
-            if total == 0 {
-                bar.set_message("No repositories found");
-            } else {
-                bar.set_message("Inspecting repositories");
-            }
+        if total == 0 {
+            self.clear();
+        } else {
+            self.start_bar(total as u64, "Inspecting repositories");
         }
     }
 
-    fn begin_repository(&self, path: &std::path::Path) {
-        if let Some(bar) = &self.bar {
+    fn begin_repository(&self, path: &Path) {
+        if let Some(bar) = self.bar.borrow().as_ref() {
             bar.set_message(format!("Inspecting {}", path.display()));
         }
     }
 
     fn finish_repository(&self) {
-        if let Some(bar) = &self.bar {
+        if let Some(bar) = self.bar.borrow().as_ref() {
             bar.inc(1);
         }
     }
