@@ -16,6 +16,10 @@ pub struct Cli {
     #[arg(short, long)]
     pub recursive: bool,
 
+    /// Include hidden directories during recursive discovery.
+    #[arg(long)]
+    pub hidden: bool,
+
     /// Select worktrees whose local branch tracks a gone upstream.
     #[arg(long)]
     pub gone: bool,
@@ -74,6 +78,7 @@ pub fn default_args() -> Cli {
     Cli {
         paths: Vec::new(),
         recursive: false,
+        hidden: false,
         gone: false,
         merged: false,
         merged_to: None,
@@ -98,9 +103,10 @@ mod tests {
 
     #[test]
     fn parses_options_at_top_level() {
-        let cli = Cli::parse_from(["gwt-sweep", "--json", "--merged", "/repo"]);
+        let cli = Cli::parse_from(["gwt-sweep", "--json", "--hidden", "--merged", "/repo"]);
 
         assert!(cli.json);
+        assert!(cli.hidden);
         assert!(cli.merged);
         assert_eq!(cli.paths, vec![PathBuf::from("/repo")]);
     }

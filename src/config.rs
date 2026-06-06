@@ -12,6 +12,7 @@ const DEFAULT_PATH: &str = ".";
 pub struct SweepConfig {
     pub paths: Vec<PathBuf>,
     pub recursive: bool,
+    pub include_hidden: bool,
     pub select_gone: bool,
     pub select_merged: bool,
     pub require_merge_base: bool,
@@ -41,6 +42,7 @@ impl SweepConfig {
                 args.paths
             },
             recursive: args.recursive,
+            include_hidden: args.hidden,
             select_gone: args.gone || !has_reason_selector,
             select_merged: has_explicit_merged_selector || !has_reason_selector,
             require_merge_base: has_explicit_merged_selector,

@@ -43,7 +43,11 @@ pub struct WorktreeInfo {
     pub inspection_error: Option<String>,
 }
 
-pub fn discover_repositories(paths: &[PathBuf], recursive: bool) -> DiscoveryResult {
+pub fn discover_repositories(
+    paths: &[PathBuf],
+    recursive: bool,
+    include_hidden: bool,
+) -> DiscoveryResult {
     let mut candidates = Vec::new();
     let mut errors = Vec::new();
 
@@ -72,7 +76,7 @@ pub fn discover_repositories(paths: &[PathBuf], recursive: bool) -> DiscoveryRes
         }
 
         if recursive && input.is_dir() {
-            discover_repositories_under(&input, &mut candidates, &mut errors);
+            discover_repositories_under(&input, include_hidden, &mut candidates, &mut errors);
         }
     }
 
@@ -303,6 +307,7 @@ pub fn same_path(left: &Path, right: &Path) -> bool {
 
 fn discover_repositories_under(
     path: &Path,
+    include_hidden: bool,
     candidates: &mut Vec<PathBuf>,
     errors: &mut Vec<DiscoveryError>,
 ) {
@@ -350,16 +355,23 @@ fn discover_repositories_under(
         }
 
         let name = entry.file_name();
-        if is_discovery_excluded(&name) {
+        if is_discovery_excluded(&name, include_hidden) {
             continue;
         }
 
-        discover_repositories_under(&entry.path(), candidates, errors);
+        discover_repositories_under(&entry.path(), include_hidden, candidates, errors);
     }
 }
 
-fn is_discovery_excluded(name: &std::ffi::OsStr) -> bool {
-    name == std::ffi::OsStr::new(".git")
+fn is_discovery_excluded(name: &std::ffi::OsStr, include_hidden: bool) -> bool {
+    if name == std::ffi::OsStr::new(".git") {
+        return true;
+    }
+
+    !include_hidden
+        && name
+            .to_str()
+            .is_some_and(|name| name.starts_with('.') && name != ".")
 }
 
 struct CommitTarget {

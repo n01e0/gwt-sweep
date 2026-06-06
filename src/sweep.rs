@@ -37,7 +37,7 @@ struct ReasonSet {
 }
 
 pub fn build_report(config: &SweepConfig, cwd: &Path) -> Result<SweepReport> {
-    let discovery = discover_repositories(&config.paths, config.recursive);
+    let discovery = discover_repositories(&config.paths, config.recursive, config.include_hidden);
     let current = current_worktree(cwd)?;
     let mut report = SweepReport {
         items: Vec::new(),
@@ -691,6 +691,43 @@ mod tests {
     }
 
     #[test]
+    fn recursive_discovery_skips_hidden_directories_by_default() {
+        let (temp, worktree_path) = hidden_repo_with_merged_worktree();
+
+        let config = SweepConfig::from_args(crate::cli::Cli {
+            paths: vec![temp.path().to_path_buf()],
+            recursive: true,
+            merged: true,
+            ..default_args()
+        })
+        .unwrap();
+        let report = build_report(&config, temp.path()).unwrap();
+
+        assert_eq!(report.summary.repositories, 0);
+        assert_eq!(report.items.len(), 0);
+        assert!(worktree_path.exists());
+    }
+
+    #[test]
+    fn recursive_discovery_includes_hidden_directories_with_hidden_flag() {
+        let (temp, worktree_path) = hidden_repo_with_merged_worktree();
+
+        let config = SweepConfig::from_args(crate::cli::Cli {
+            paths: vec![temp.path().to_path_buf()],
+            recursive: true,
+            hidden: true,
+            merged: true,
+            ..default_args()
+        })
+        .unwrap();
+        let report = build_report(&config, temp.path()).unwrap();
+
+        assert_eq!(report.summary.repositories, 1);
+        assert_eq!(report.summary.would_remove, 1);
+        assert_eq!(report.items[0].path, worktree_path.display().to_string());
+    }
+
+    #[test]
     fn prunable_worktree_metadata_is_reported_without_aborting() {
         let fixture = GitFixture::new();
         fixture.create_branch("stale");
@@ -1206,6 +1243,25 @@ mod tests {
                 .tag_lightweight(tag, commit.as_object(), false)
                 .unwrap();
         }
+    }
+
+    fn hidden_repo_with_merged_worktree() -> (TempDir, std::path::PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let hidden_dir = temp.path().join(".hidden");
+        let repo_path = hidden_dir.join("repo");
+        fs::create_dir_all(&repo_path).unwrap();
+        let repo = Repository::init(&repo_path).unwrap();
+        initial_commit(&repo, "main");
+        let commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("merged-hidden", &commit, false).unwrap();
+        let worktree_path = hidden_dir.join("merged-hidden-wt");
+        let reference = repo.find_reference("refs/heads/merged-hidden").unwrap();
+        let mut options = git2::WorktreeAddOptions::new();
+        options.reference(Some(&reference));
+        repo.worktree("merged-hidden-wt", &worktree_path, Some(&options))
+            .unwrap();
+
+        (temp, worktree_path)
     }
 
     fn initial_commit(repo: &Repository, branch: &str) {

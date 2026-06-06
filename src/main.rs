@@ -35,7 +35,7 @@ fn run_cli(cli: Cli) -> Result<ExitCode> {
     if config.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        print_human_report(&report);
+        print_human_report(&report)?;
     }
 
     if report.summary.errors > 0 {
