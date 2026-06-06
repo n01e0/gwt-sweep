@@ -70,19 +70,27 @@ pub fn update_summary(summary: &mut SweepSummary, item: &SweepItem) {
     }
 }
 
-pub fn print_human_report(report: &SweepReport) -> io::Result<()> {
+pub fn print_human_report(report: &SweepReport, verbose: bool) -> io::Result<()> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
-    write_human_report(&mut stdout, report)
+    write_human_report(&mut stdout, report, verbose)
 }
 
-fn write_human_report(writer: &mut impl Write, report: &SweepReport) -> io::Result<()> {
+fn write_human_report(
+    writer: &mut impl Write,
+    report: &SweepReport,
+    verbose: bool,
+) -> io::Result<()> {
     let items = report
         .items
         .iter()
-        .filter(|item| item.kind == KIND_WORKTREE && item.action != ACTION_ERROR)
+        .filter(|item| verbose || (item.kind == KIND_WORKTREE && item.action != ACTION_ERROR))
         .collect::<Vec<_>>();
     if items.is_empty() {
+        if verbose {
+            writeln!(writer, "No matching worktrees.")?;
+            write_summary(writer, report)?;
+        }
         return Ok(());
     }
 
@@ -99,9 +107,43 @@ fn write_human_report(writer: &mut impl Write, report: &SweepReport) -> io::Resu
             "{:<14} {:<5} {:<28} {:<22} {}",
             item.action, item.dirty, branch, reasons, item.path
         )?;
+
+        if verbose {
+            if let Some(reason) = &item.skip_reason {
+                writeln!(writer, "  note: {reason}")?;
+            }
+            if let Some(error) = &item.error {
+                writeln!(writer, "  error: {error}")?;
+            }
+            if let Some(action) = &item.branch_action {
+                writeln!(writer, "  branch: {action}")?;
+            }
+            if let Some(error) = &item.branch_error {
+                writeln!(writer, "  branch error: {error}")?;
+            }
+        }
+    }
+
+    if verbose {
+        write_summary(writer, report)?;
     }
 
     Ok(())
+}
+
+fn write_summary(writer: &mut impl Write, report: &SweepReport) -> io::Result<()> {
+    writeln!(
+        writer,
+        "Summary: repositories={}, matched={}, would_remove={}, removed={}, skipped={}, errors={}, branch_deleted={}, dry_run={}",
+        report.summary.repositories,
+        report.summary.matched,
+        report.summary.would_remove,
+        report.summary.removed,
+        report.summary.skipped,
+        report.summary.errors,
+        report.summary.branch_deleted,
+        report.summary.dry_run
+    )
 }
 
 #[cfg(test)]
@@ -150,7 +192,7 @@ mod tests {
         };
         let mut output = Vec::new();
 
-        write_human_report(&mut output, &report).unwrap();
+        write_human_report(&mut output, &report, false).unwrap();
 
         assert!(output.is_empty());
     }
@@ -203,7 +245,7 @@ mod tests {
         };
         let mut output = Vec::new();
 
-        write_human_report(&mut output, &report).unwrap();
+        write_human_report(&mut output, &report, false).unwrap();
         let output = String::from_utf8(output).unwrap();
 
         assert!(output.contains("would_remove"));
@@ -214,5 +256,61 @@ mod tests {
         assert!(!output.contains("worktree detail"));
         assert!(!output.contains("branch detail"));
         assert!(!output.contains("skip note"));
+    }
+
+    #[test]
+    fn verbose_human_report_includes_errors_and_summary() {
+        let report = SweepReport {
+            items: vec![SweepItem {
+                kind: KIND_REPOSITORY_ERROR.to_owned(),
+                repo: "/repo".to_owned(),
+                path: "/bad".to_owned(),
+                branch: None,
+                head: None,
+                reasons: vec!["repo:error".to_owned()],
+                dirty: false,
+                locked: false,
+                action: ACTION_ERROR.to_owned(),
+                skip_reason: None,
+                error: Some("repo failed".to_owned()),
+                branch_deleted: false,
+                branch_action: None,
+                branch_error: None,
+            }],
+            summary: SweepSummary {
+                dry_run: true,
+                repositories: 0,
+                errors: 1,
+                ..SweepSummary::default()
+            },
+        };
+        let mut output = Vec::new();
+
+        write_human_report(&mut output, &report, true).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("repo:error"));
+        assert!(output.contains("/bad"));
+        assert!(output.contains("repo failed"));
+        assert!(output.contains("Summary:"));
+    }
+
+    #[test]
+    fn verbose_human_report_mentions_empty_results() {
+        let report = SweepReport {
+            items: Vec::new(),
+            summary: SweepSummary {
+                dry_run: true,
+                repositories: 1,
+                ..SweepSummary::default()
+            },
+        };
+        let mut output = Vec::new();
+
+        write_human_report(&mut output, &report, true).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("No matching worktrees."));
+        assert!(output.contains("Summary:"));
     }
 }

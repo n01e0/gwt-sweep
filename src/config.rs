@@ -27,6 +27,7 @@ pub struct SweepConfig {
     pub force_with_dirty: bool,
     pub delete_branch: bool,
     pub json: bool,
+    pub verbose: bool,
 }
 
 impl SweepConfig {
@@ -57,6 +58,7 @@ impl SweepConfig {
             force_with_dirty: args.force_with_dirty,
             delete_branch: args.delete_branch,
             json: args.json,
+            verbose: args.verbose,
         })
     }
 }

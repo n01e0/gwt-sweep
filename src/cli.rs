@@ -71,6 +71,10 @@ pub struct Cli {
     /// Print a machine-readable JSON report.
     #[arg(long)]
     pub json: bool,
+
+    /// Print summaries and detailed errors.
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 #[cfg(test)]
@@ -92,6 +96,7 @@ pub fn default_args() -> Cli {
         force_with_dirty: false,
         delete_branch: false,
         json: false,
+        verbose: false,
     }
 }
 
@@ -103,9 +108,17 @@ mod tests {
 
     #[test]
     fn parses_options_at_top_level() {
-        let cli = Cli::parse_from(["gwt-sweep", "--json", "--hidden", "--merged", "/repo"]);
+        let cli = Cli::parse_from([
+            "gwt-sweep",
+            "--json",
+            "--verbose",
+            "--hidden",
+            "--merged",
+            "/repo",
+        ]);
 
         assert!(cli.json);
+        assert!(cli.verbose);
         assert!(cli.hidden);
         assert!(cli.merged);
         assert_eq!(cli.paths, vec![PathBuf::from("/repo")]);
