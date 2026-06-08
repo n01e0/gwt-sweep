@@ -10,7 +10,7 @@ use crate::git::{
     DiscoveryProgress, MergeBase, RepoInfo, WorktreeInfo, branch_tracks_gone_upstream,
     check_branch_delete_safety, current_worktree, delete_branch_safely,
     discover_repositories_with_progress, is_ancestor, is_worktree_dirty, list_worktrees, open_repo,
-    remove_worktree, same_path,
+    remove_worktree,
 };
 use crate::report::{
     ACTION_ERROR, ACTION_REMOVED, ACTION_SKIP, ACTION_WOULD_REMOVE, KIND_REPOSITORY_ERROR,
@@ -234,17 +234,17 @@ fn evaluate_worktree(
     config: &SweepConfig,
     current_worktree: Option<&Path>,
 ) -> Result<Option<Evaluation>> {
-    let is_current = current_worktree.is_some_and(|current| same_path(current, &worktree.path));
+    let is_current = current_worktree.is_some_and(|current| current == worktree.path.as_path());
     if is_current && !config.select_all {
+        return Ok(None);
+    }
+
+    if !matches_filters(worktree.branch.as_deref(), &worktree.path, config) {
         return Ok(None);
     }
 
     let mut reason_set = collect_reasons(repo, worktree, context, config)?;
     if reason_set.reasons.is_empty() {
-        return Ok(None);
-    }
-
-    if !matches_filters(worktree.branch.as_deref(), &worktree.path, config) {
         return Ok(None);
     }
 

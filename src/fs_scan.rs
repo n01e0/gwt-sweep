@@ -21,25 +21,28 @@ pub fn is_scan_excluded(name: &OsStr) -> bool {
 }
 
 pub fn is_older_than(path: &Path, age: Duration) -> std::io::Result<bool> {
-    let latest = latest_mtime(path)?;
-    match SystemTime::now().duration_since(latest) {
-        Ok(elapsed) => Ok(elapsed >= age),
-        Err(_) => Ok(false),
-    }
+    let now = SystemTime::now();
+    Ok(!has_mtime_newer_than_age(path, now, age)?)
 }
 
-fn latest_mtime(path: &Path) -> std::io::Result<SystemTime> {
+fn has_mtime_newer_than_age(path: &Path, now: SystemTime, age: Duration) -> std::io::Result<bool> {
     let metadata = fs::symlink_metadata(path)?;
-    let mut latest = metadata.modified()?;
+    if mtime_is_newer_than_age(metadata.modified()?, now, age) {
+        return Ok(true);
+    }
 
     if metadata.is_dir() {
-        scan_latest_mtime(path, &mut latest)?;
+        return scan_has_mtime_newer_than_age(path, now, age);
     }
 
-    Ok(latest)
+    Ok(false)
 }
 
-fn scan_latest_mtime(path: &Path, latest: &mut SystemTime) -> std::io::Result<()> {
+fn scan_has_mtime_newer_than_age(
+    path: &Path,
+    now: SystemTime,
+    age: Duration,
+) -> std::io::Result<bool> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         let file_name = entry.file_name();
@@ -49,14 +52,21 @@ fn scan_latest_mtime(path: &Path, latest: &mut SystemTime) -> std::io::Result<()
 
         let entry_path = entry.path();
         let metadata = fs::symlink_metadata(&entry_path)?;
-        let modified = metadata.modified()?;
-        if modified > *latest {
-            *latest = modified;
+        if mtime_is_newer_than_age(metadata.modified()?, now, age) {
+            return Ok(true);
         }
 
-        if metadata.is_dir() {
-            scan_latest_mtime(&entry_path, latest)?;
+        if metadata.is_dir() && scan_has_mtime_newer_than_age(&entry_path, now, age)? {
+            return Ok(true);
         }
     }
-    Ok(())
+
+    Ok(false)
+}
+
+fn mtime_is_newer_than_age(modified: SystemTime, now: SystemTime, age: Duration) -> bool {
+    match now.duration_since(modified) {
+        Ok(elapsed) => elapsed < age,
+        Err(_) => true,
+    }
 }

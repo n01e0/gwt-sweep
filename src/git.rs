@@ -314,10 +314,6 @@ pub fn canonicalize_best_effort(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
-pub fn same_path(left: &Path, right: &Path) -> bool {
-    canonicalize_best_effort(left) == canonicalize_best_effort(right)
-}
-
 fn discover_repositories_under(
     path: &Path,
     include_hidden: bool,
