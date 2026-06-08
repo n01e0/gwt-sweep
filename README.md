@@ -4,7 +4,7 @@
 
 ## Installation
 
-After the crate is published:
+With cargo
 
 ```sh
 cargo install gwt-sweep
@@ -96,7 +96,7 @@ gwt-sweep --merged-to trunk --force --delete-branch
 
 ## インストール
 
-crate 公開後:
+cargo:
 
 ```sh
 cargo install gwt-sweep
